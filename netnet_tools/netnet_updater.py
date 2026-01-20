@@ -452,8 +452,6 @@ def sync_calculation_sheet_dates(
         'ncav': (1, 4),
         'profitability': (1, 3),
         'ro': (1, 3),
-        'piotrosky': (1, 4),
-        'C7': (1, 4),
     }
 
     for sheet_name in calculation_sheets:
@@ -514,8 +512,6 @@ def extend_calculation_sheet_formulas(
         'ncav': (4, 30),
         'profitability': (3, 15),
         'ro': (3, 20),
-        'piotrosky': (4, 15),
-        'C7': (4, 20),
     }
 
     total_formulas = 0
