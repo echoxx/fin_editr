@@ -1,0 +1,114 @@
+I need you to build a Python tool that automates updating my net-net stock analysis Excel workbooks. Let me explain the structure and what I need.
+
+## Context
+
+I have a template Excel workbook for analyzing net-net stocks. Each company gets its own workbook with the same structure. The workbook has:
+
+**Raw data input sheets (manually pasted from Investing.com Pro exports):**
+- `[company]_IS` - Income Statement data
+- `[company]_bs` - Balance Sheet data
+
+These sheets have:
+- Company name in C2
+- "Income Statement" or "Balance Sheet" label in C6
+- Period codes in row 8 (FH-19, FH-18, ... FH)
+- Period end dates in row 10 (e.g., 2016-03-31, 2016-09-30, ...)
+- Financial line items starting row 12, with labels in column C and data in columns D onwards
+
+**Downstream calculation sheets (all formula-driven, pulling from the raw data sheets):**
+- `ncav` - Net current asset value calculations
+- `ro` - Return on assets/equity calculations  
+- `profitability` - Margin and growth calculations
+- `piotrosky` - Piotroski F-score (partially manual)
+- `C7` - Evan Bleker's checklist (partially manual)
+- `Overview` - Company metadata (manual)
+- `ownership` - Insider ownership (manual)
+
+The calculation sheets use formulas like `=_xlfn.NUMBERVALUE(almedio_bs!D12)` to pull from the raw data sheets. The formulas are positional - they assume specific rows contain specific line items.
+
+## What I need you to build
+
+### Phase 1: Validation and structure mapping tool
+
+Create a Python script called `netnet_validator.py` that:
+
+1. **Takes an existing workbook as input** and maps its structure:
+   - Identifies the IS and BS sheet names (they follow pattern `[something]_IS` and `[something]_bs`)
+   - Extracts the row-to-label mapping (e.g., row 12 = "Cash And Equivalents", row 14 = "Accounts Receivable, Net")
+   - Extracts the column-to-date mapping
+   - Saves this mapping to a JSON file called `[company]_structure.json`
+
+2. **Validates a new Investing.com export** against an existing structure:
+   - Takes the structure JSON and a new CSV/Excel export
+   - Checks if row labels match expected positions
+   - Reports any mismatches or missing fields
+   - Reports any new periods available in the export
+
+3. **Generates a diff report** showing what would change if the new data were applied
+
+### Phase 2: Safe update tool
+
+Create `netnet_updater.py` that:
+
+1. Takes an existing workbook and new IS/BS data files
+2. Validates structure compatibility (using Phase 1 logic)
+3. If valid:
+   - Creates a backup of the original workbook
+   - Updates the raw data cells in the IS and BS sheets
+   - Updates date headers in the calculation sheets if new periods exist
+   - Extends formulas to new columns if needed (copying the pattern from the last column)
+4. Outputs a summary of changes made
+
+### Key requirements
+
+- Use `openpyxl` for Excel manipulation
+- Preserve all existing formatting, formulas, and structure
+- Never overwrite formulas - only update raw data cells
+- Handle the string-formatted numbers from Investing.com (e.g., "1,853.0", "-15.5%")
+- Be defensive - fail loudly if anything unexpected is encountered
+- Create detailed logs of all operations
+
+### Row mappings to expect in Investing.com exports
+
+**Income Statement (expected row positions):**
+- Row 12: Revenue
+- Row 15: Cost of Revenues  
+- Row 16: Gross Profit
+- Row 24: Operating Income
+- Row 33: Net Income to Stockholders
+- Row 40: Weighted Average Basic Shares Out.
+- Row 43: EBITDA
+- Row 44: EBIT
+
+**Balance Sheet (expected row positions):**
+- Row 12: Cash And Equivalents
+- Row 13: Short Term Investments
+- Row 14: Accounts Receivable, Net
+- Row 15: Inventory
+- Row 18: Total Current Assets
+- Row 27: Total Assets
+- Row 24: Goodwill
+- Row 25: Other Intangibles
+- Row 35: Total Current Liabilities
+- Row 40: Total Liabilities
+- Row 32: Current Portion of LT Debt
+- Row 37: Long-term Debt
+- Row 51: Total Equity
+
+### File to test with
+
+I have an example workbook in this same working directory called "almedio.xlsx".
+Examples of incoming raw data from Investing.com are also included in this directory: 
+"Almedio Inc - Income Statement.xlsx" and "Almedio Inc - Balance Sheet.xlsx". This data has been
+import and is contained in "almedio.xlsx". Eventually this processs should also be automated,
+but first let's just start with exploring Claude's ability to edit .xlsx files.
+
+Start by examining this file to verify my description matches the actual structure, then build the tools.
+
+### Output
+
+Put all scripts in a `netnet_tools/` directory with:
+- `netnet_validator.py` 
+- `netnet_updater.py`
+- `README.md` explaining usage
+- A `tests/` folder with the structure JSON from my example file
