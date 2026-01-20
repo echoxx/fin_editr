@@ -1,0 +1,198 @@
+NET-NET WORKBOOK UPDATE GUIDE
+=============================
+
+This guide explains how to use the Python tools to update your net-net
+stock analysis Excel workbooks with fresh data from Investing.com Pro.
+
+
+WHAT THESE TOOLS DO
+-------------------
+
+You have two Python scripts:
+
+1. netnet_validator.py - The "checker"
+   - Looks at your existing workbook and learns its structure
+   - Compares new data files to make sure they'll fit
+   - Shows you what would change before you commit
+
+2. netnet_updater.py - The "updater"
+   - Actually copies new data into your workbook
+   - Creates a backup first (so you can undo if needed)
+   - Only updates the raw data cells, never touches your formulas
+
+
+HOW YOUR WORKBOOKS ARE ORGANIZED
+--------------------------------
+
+Each company workbook has:
+
+  Raw Data Sheets (where Investing.com data goes):
+  - [company]_IS  = Income Statement numbers
+  - [company]_bs  = Balance Sheet numbers
+
+  Calculation Sheets (your analysis - these have formulas):
+  - ncav, profitability, ro, piotrosky, C7, Overview, ownership
+
+The tools ONLY modify the raw data sheets. Your formulas in the
+calculation sheets automatically pull from the raw data, so they
+update themselves once the raw data changes.
+
+
+STEP-BY-STEP: UPDATING AN EXISTING COMPANY
+------------------------------------------
+
+Let's say you want to update "almedio.xlsx" with new quarterly data.
+
+Step 1: Download fresh data from Investing.com Pro
+   - Export the Income Statement as Excel
+   - Export the Balance Sheet as Excel
+   - Save them somewhere you can find them
+
+Step 2: Open a command prompt / terminal
+   - Navigate to your fin_editr folder
+
+Step 3: Preview what will change (optional but recommended)
+
+   python netnet_tools/netnet_validator.py diff ^
+       --workbook almedio.xlsx ^
+       --is-file "Almedio Inc - Income Statement.xlsx" ^
+       --bs-file "Almedio Inc - Balance Sheet.xlsx" ^
+       --verbose
+
+   This shows you exactly what cells will be updated without
+   changing anything.
+
+Step 4: Run the actual update
+
+   python netnet_tools/netnet_updater.py ^
+       --workbook almedio.xlsx ^
+       --is-file "Almedio Inc - Income Statement.xlsx" ^
+       --bs-file "Almedio Inc - Balance Sheet.xlsx"
+
+   This will:
+   - Create a backup (almedio_backup_20250118_143022.xlsx)
+   - Update all the raw data cells
+   - Tell you how many cells changed
+
+Step 5: Open the workbook in Excel
+   - Check that your calculation sheets look right
+   - The formulas should now show updated numbers
+
+
+STEP-BY-STEP: SETTING UP A NEW COMPANY
+--------------------------------------
+
+To analyze a new company, you need to create a workbook from your
+template first, then the tools can update it going forward.
+
+Step 1: Copy your template workbook
+   - Make a copy of an existing workbook (like almedio.xlsx)
+   - Rename it for the new company (e.g., "newcompany.xlsx")
+
+Step 2: Rename the raw data sheets
+   - Change "almedio_IS" to "newcompany_IS"
+   - Change "almedio_bs" to "newcompany_bs"
+
+   (The sheet names must end in _IS and _bs for the tools to find them)
+
+Step 3: Update the formulas in calculation sheets
+   - Find/Replace "almedio_IS" with "newcompany_IS"
+   - Find/Replace "almedio_bs" with "newcompany_bs"
+   - Update the company name in cell C2 of the raw data sheets
+
+Step 4: Download data from Investing.com Pro
+   - Export Income Statement for the new company
+   - Export Balance Sheet for the new company
+
+Step 5: Clear out the old data and paste new data
+   - For the first import, you may want to manually paste the
+     Investing.com data into the _IS and _bs sheets
+   - Or use the updater tool if the row structure matches
+
+Step 6: Save and verify
+   - Check that calculation sheets show sensible numbers
+   - Save the workbook
+
+Step 7: Create a structure file (for future updates)
+
+   python netnet_tools/netnet_validator.py map ^
+       --workbook newcompany.xlsx ^
+       --output newcompany_structure.json
+
+   This saves the structure so you can validate future updates.
+
+From now on, you can use the updater tool to refresh data just like
+with almedio.xlsx.
+
+
+COMMON SITUATIONS
+-----------------
+
+"I want to see changes without updating"
+   Use the --dry-run flag:
+
+   python netnet_tools/netnet_updater.py ^
+       --workbook mycompany.xlsx ^
+       --is-file "income.xlsx" ^
+       --bs-file "balance.xlsx" ^
+       --dry-run
+
+"The new export has additional quarters I want to add"
+   Use the --extend-periods flag:
+
+   python netnet_tools/netnet_updater.py ^
+       --workbook mycompany.xlsx ^
+       --is-file "income.xlsx" ^
+       --bs-file "balance.xlsx" ^
+       --extend-periods
+
+   This adds new columns and extends the formulas.
+
+"I only have a new Income Statement, not Balance Sheet"
+   Just omit the --bs-file:
+
+   python netnet_tools/netnet_updater.py ^
+       --workbook mycompany.xlsx ^
+       --is-file "income.xlsx"
+
+"Something went wrong, how do I undo?"
+   The tool creates a backup before every update. Find the file
+   named like "mycompany_backup_20250118_143022.xlsx" and rename
+   it back to "mycompany.xlsx".
+
+"The tool says row labels don't match"
+   This means Investing.com's export has different line items than
+   your workbook expects. You can:
+   - Use --force to update anyway (may cause issues)
+   - Manually check what's different
+   - Adjust your template if Investing.com changed their format
+
+
+QUICK REFERENCE
+---------------
+
+Preview changes:
+  python netnet_tools/netnet_validator.py diff -w WORKBOOK.xlsx ^
+      --is-file IS_EXPORT.xlsx --bs-file BS_EXPORT.xlsx -v
+
+Update workbook:
+  python netnet_tools/netnet_updater.py -w WORKBOOK.xlsx ^
+      --is-file IS_EXPORT.xlsx --bs-file BS_EXPORT.xlsx
+
+Update with new periods:
+  python netnet_tools/netnet_updater.py -w WORKBOOK.xlsx ^
+      --is-file IS_EXPORT.xlsx --bs-file BS_EXPORT.xlsx --extend-periods
+
+Save structure for validation:
+  python netnet_tools/netnet_validator.py map -w WORKBOOK.xlsx ^
+      --output COMPANY_structure.json
+
+
+NOTES
+-----
+
+- Always keep backups of important workbooks
+- The tools never modify your formulas, only raw data cells
+- Open the workbook in Excel after updating to verify everything looks right
+- If row positions change in Investing.com exports, you may need to
+  adjust your template or create a new structure file
