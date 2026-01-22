@@ -92,7 +92,13 @@ async def run_full_workflow(
 
             folder_path = Path(existing_folder)
             if not folder_path.is_absolute():
-                folder_path = base / folder_path
+                # Try relative to current working directory first
+                cwd_path = Path.cwd() / folder_path
+                if cwd_path.exists():
+                    folder_path = cwd_path.resolve()
+                else:
+                    # Fall back to relative to base directory
+                    folder_path = (base / folder_path).resolve()
 
             if not folder_path.exists():
                 result.error = f"Folder not found: {folder_path}"

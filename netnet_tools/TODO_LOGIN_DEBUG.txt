@@ -1,0 +1,48 @@
+TODO: Debug Investing.com Login Automation
+==========================================
+Date: 2026-01-22
+
+ISSUE:
+------
+The automated login to Investing.com Pro is not yet working. Need to debug:
+
+1. KEYRING ISSUE (WSL):
+   - OS keyring not available on WSL, now falls back to encrypted file storage
+   - File storage implemented in credentials.py (~/.fin_editr/credentials.enc)
+   - This part should work now, but needs testing
+
+2. GMAIL/OAUTH LOGIN:
+   - User logs into Investing.com via Gmail address
+   - Investing.com may use Google OAuth for this
+   - Playwright automation cannot handle OAuth popups easily
+   - POTENTIAL SOLUTIONS:
+     a) User sets a direct password on Investing.com account
+        (https://www.investing.com/members-admin/account)
+     b) Investigate if Investing.com has a direct email/password option
+     c) Look into handling Google OAuth with Playwright (complex)
+
+3. INVESTING.COM SITE STRUCTURE:
+   - Need to verify the CSS selectors in investing_scraper.py match current site
+   - Site may have changed since initial development
+   - Test with --no-headless flag to watch browser behavior
+
+WORKAROUND (CURRENT):
+---------------------
+Use --skip-download flag with manually downloaded files:
+
+    python netnet_main.py analyze TICKER --skip-download --folder ./FOLDER
+
+This skips the web automation entirely and uses existing IS/BS files.
+
+TO TEST WHEN READY:
+-------------------
+1. Run: python netnet_main.py setup-credentials
+2. Run: python netnet_main.py verify-credentials
+3. Run: python netnet_main.py analyze 7859 --exchange TYO --no-headless
+   (watch browser to see where it fails)
+
+FILES INVOLVED:
+---------------
+- netnet_tools/credentials.py - credential storage
+- netnet_tools/investing_scraper.py - web automation
+- netnet_tools/netnet_workflow.py - orchestration (has skip_download logic)

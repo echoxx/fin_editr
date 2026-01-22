@@ -1,0 +1,67 @@
+NET-NET AUTOMATED WORKFLOW - QUICK USAGE GUIDE
+===============================================
+
+NOTE: Automated downloading from Investing.com is not yet working.
+      See TODO_LOGIN_DEBUG.txt for details.
+      For now, use --skip-download with manually downloaded files.
+
+
+USE EXISTING DOWNLOADED FILES (RECOMMENDED FOR NOW)
+---------------------------------------------------
+1. Manually download IS and BS from Investing.com Pro
+2. Save them in a folder (e.g., ./NewCompany/)
+3. Run:
+
+python netnet_main.py analyze TICKER --skip-download --folder ./NewCompany
+
+Examples:
+    python netnet_main.py analyze 7859 --skip-download --folder ../trilogiq
+    python netnet_main.py analyze 7859 --skip-download --folder ../Toso
+
+
+FULL AUTOMATION (NOT YET WORKING)
+---------------------------------
+Once login is debugged, this will work:
+
+# First time setup
+python netnet_main.py setup-credentials
+
+# Analyze a stock
+python netnet_main.py analyze 7859 --exchange TYO
+
+
+OTHER COMMANDS
+--------------
+# List existing analyses
+python netnet_main.py list
+
+# Test that credentials work
+python netnet_main.py verify-credentials
+
+# Debug mode (watch the browser)
+python netnet_main.py analyze 7859 --exchange TYO --no-headless
+
+# Dry run (see what would happen)
+python netnet_main.py analyze 7859 --exchange TYO --dry-run
+
+
+AFTER ANALYSIS
+--------------
+Open the workbook and fill in:
+- Industry (manual research)
+- Price (current stock price)
+- Exchange Rate (if non-USD)
+
+Then run autoscoring if you didn't provide --price:
+python netnet_autoscore.py toso/toso.xlsx --price 879
+
+
+COMMON EXCHANGE CODES
+---------------------
+TYO     Tokyo Stock Exchange (Japan)
+HKG     Hong Kong Stock Exchange
+NYSE    New York Stock Exchange
+NASDAQ  NASDAQ
+LON     London Stock Exchange
+EPA     Euronext Paris
+ETR     Frankfurt Stock Exchange
