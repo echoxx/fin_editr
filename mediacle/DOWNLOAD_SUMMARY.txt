@@ -1,0 +1,158 @@
+MEDIACLE GROUP AB - IR DOCUMENT DOWNLOAD & TRANSLATION SUMMARY
+================================================================
+Date: 2026-01-24
+Company: Mediacle Group AB
+Stock Ticker: MEGR (NGM Stockholm)
+Primary Language: Swedish
+Website: https://www.mediacle.com/investor-relations/
+
+OVERVIEW
+--------
+Successfully downloaded and translated all available investor relations documents from Mediacle Group AB.
+All documents were originally in Swedish and have been translated to English using Google Translate.
+
+TOTAL DOCUMENTS
+---------------
+Original PDFs Downloaded: 15
+English Translations: 15
+Total Files: 30
+
+DOCUMENT BREAKDOWN BY CATEGORY
+------------------------------
+
+1. ANNUAL REPORTS (2 documents)
+   - Annual Report 2024 (942 KB)
+     Original: mediacle_annual_report_2024.pdf
+     Translated: mediacle_annual_report_2024_EN.pdf
+
+   - Annual Report 2023 (890 KB)
+     Original: mediacle_annual_report_2023.pdf
+     Translated: mediacle_annual_report_2023_EN.pdf
+
+2. YEAR-END STATEMENTS / Q4 REPORTS (2 documents)
+   - Q4 2024 Year-End Report (2.3 MB)
+     Original: mediacle_Q4_2024_year_end.pdf
+     Translated: mediacle_Q4_2024_year_end_EN.pdf
+     Published: February 28, 2025
+
+   - Q4 2023 Year-End Report (1.3 MB)
+     Original: mediacle_Q4_2023_year_end.pdf
+     Translated: mediacle_Q4_2023_year_end_EN.pdf
+     Published: February 28, 2024
+
+3. QUARTERLY REPORTS - 2025 (3 documents)
+   - Q3 2025 Report (1.1 MB)
+     Original: mediacle_Q3_2025.pdf
+     Translated: mediacle_Q3_2025_EN.pdf
+     Published: November 27, 2025
+
+   - Q2 2025 Report (1.1 MB)
+     Original: mediacle_Q2_2025.pdf
+     Translated: mediacle_Q2_2025_EN.pdf
+     Published: August 29, 2025
+
+   - Q1 2025 Report (722 KB)
+     Original: mediacle_Q1_2025.pdf
+     Translated: mediacle_Q1_2025_EN.pdf
+     Published: May 30, 2025
+
+4. QUARTERLY REPORTS - 2024 (3 documents)
+   - Q3 2024 Report (2.1 MB)
+     Original: mediacle_Q3_2024.pdf
+     Translated: mediacle_Q3_2024_EN.pdf
+     Published: November 29, 2024
+
+   - Q2 2024 Report (2.3 MB)
+     Original: mediacle_Q2_2024.pdf
+     Translated: mediacle_Q2_2024_EN.pdf
+     Published: August 30, 2024
+
+   - Q1 2024 Report (2.3 MB)
+     Original: mediacle_Q1_2024.pdf
+     Translated: mediacle_Q1_2024_EN.pdf
+     Published: May 30, 2024
+
+5. QUARTERLY REPORTS - 2023 (3 documents)
+   - Q3 2023 Report (1.3 MB)
+     Original: mediacle_Q3_2023.pdf
+     Translated: mediacle_Q3_2023_EN.pdf
+     Published: November 30, 2023
+
+   - Q2 2023 Report (1.3 MB)
+     Original: mediacle_Q2_2023.pdf
+     Translated: mediacle_Q2_2023_EN.pdf
+     Published: August 31, 2023
+
+   - Q1 2023 Report (1.3 MB)
+     Original: mediacle_Q1_2023.pdf
+     Translated: mediacle_Q1_2023_EN.pdf
+     Published: May 31, 2023
+
+6. CORPORATE DOCUMENTS (2 documents)
+   - Information Memorandum 2019 (2.0 MB)
+     Original: mediacle_information_memorandum_2019.pdf
+     Translated: mediacle_information_memorandum_2019_EN.pdf
+
+   - Information Policy (65 KB)
+     Original: mediacle_information_policy.pdf
+     Translated: mediacle_information_policy_EN.pdf
+
+FINANCIAL HIGHLIGHTS (from latest available data)
+-------------------------------------------------
+
+2024 Full Year Results:
+- Net Revenue: 69.1 MSEK (vs 76.4 MSEK in 2023)
+- EBITDA: 23.9 MSEK (vs 42.3 MSEK in 2023)
+- EBITDA per share: 1.90 SEK (vs 3.35 SEK in 2023)
+
+Q3 2025 Results:
+- Net Revenue: 17.5 MSEK (vs 19.6 MSEK in Q3 2024)
+- EBITDA: 10.3 MSEK (vs 6.6 MSEK in Q3 2024)
+- EBITDA per share: 0.82 SEK (vs 0.53 SEK in Q3 2024)
+
+TRANSLATION METHOD
+------------------
+Method: Google Translate (Selenium automation)
+Translation Time: 366.7 seconds (6.1 minutes)
+Average Time per Document: 24.4 seconds
+Success Rate: 100% (15/15 documents translated successfully)
+Output Format: PDF with _EN suffix
+
+COMPANY INFORMATION
+-------------------
+Company Name: Mediacle Group AB
+Business: Digital services and IT solutions for iGaming and lead generation
+Stock Exchange: Nordic Growth Market (NGM) Stockholm
+Ticker: MEGR
+Share Capital: 6,305,297 SEK (12,610,594 shares)
+IR Contact: ir@mediacle.com
+
+DOCUMENT SOURCES
+----------------
+All documents were downloaded from official sources:
+- Annual Reports: Cision News Platform (mb.cision.com)
+- Quarterly Reports: Cision News Platform (mb.cision.com)
+- Corporate Documents: Mediacle.com official website
+
+FILE LOCATION
+-------------
+All documents saved to: /mnt/e/Google Drive/Investing/Stocks/netnets/fin_getr/mediacle/
+
+NOTES
+-----
+- All original documents are in Swedish
+- English translations preserve original formatting
+- Documents cover financial periods from 2023 to Q3 2025
+- Complete coverage of quarterly reports for 2023, 2024, and 2025 (to date)
+- All translations verified as complete with no failures
+
+DOCUMENT PRIORITY FOR ANALYSIS
+------------------------------
+For financial analysis, recommended reading order:
+1. Annual Report 2024 (most comprehensive)
+2. Q4 2024 Year-End Statement (latest full year)
+3. Q3 2025 Report (most recent quarterly)
+4. Annual Report 2023 (year-over-year comparison)
+5. Quarterly reports (for trend analysis)
+
+END OF SUMMARY

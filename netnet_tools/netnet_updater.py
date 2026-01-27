@@ -80,6 +80,11 @@ class UpdateResult:
         self.bs_cells_updated = 0
         self.new_columns_added = 0
         self.formulas_extended = 0
+        self.sheets_renamed = 0
+        self.formula_refs_updated = 0
+        self.price_formulas_updated = 0
+        self.old_company_prefix: str | None = None
+        self.new_company_prefix: str | None = None
         self.errors: list[str] = []
         self.warnings: list[str] = []
         self.changes_log: list[dict] = []
@@ -93,6 +98,11 @@ class UpdateResult:
             "bs_cells_updated": self.bs_cells_updated,
             "new_columns_added": self.new_columns_added,
             "formulas_extended": self.formulas_extended,
+            "sheets_renamed": self.sheets_renamed,
+            "formula_refs_updated": self.formula_refs_updated,
+            "price_formulas_updated": self.price_formulas_updated,
+            "old_company_prefix": self.old_company_prefix,
+            "new_company_prefix": self.new_company_prefix,
             "errors": self.errors,
             "warnings": self.warnings,
             "changes_log": self.changes_log
@@ -314,6 +324,174 @@ def normalize_label(label: str) -> str:
     if not label:
         return ""
     return " ".join(label.lower().strip().split())
+
+
+def extract_company_name_from_filename(filename: str) -> str | None:
+    """Extract company name from an Investing.com export filename.
+
+    Expected formats:
+    - "Nansin Co Ltd - Balance Sheet.xlsx"
+    - "Almedio Inc - Income Statement.xlsx"
+    - "Car Mate Mfg Co Ltd - Balance Sheet.xlsx"
+
+    Returns the company name portion, or None if not parseable.
+    """
+    if not filename:
+        return None
+
+    # Get just the filename without path
+    basename = Path(filename).stem  # e.g., "Nansin Co Ltd - Balance Sheet"
+
+    # Split on " - " to separate company name from statement type
+    parts = basename.split(" - ")
+    if len(parts) >= 2:
+        return parts[0].strip()
+
+    return None
+
+
+def normalize_company_name_for_sheet(company_name: str) -> str:
+    """Convert company name to a valid sheet name prefix.
+
+    Examples:
+    - "Nansin Co Ltd" -> "nansin"
+    - "Almedio Inc" -> "almedio"
+    - "Car Mate Mfg Co Ltd" -> "carmate"
+    """
+    if not company_name:
+        return ""
+
+    # Take first word and lowercase it
+    # For multi-word companies like "Car Mate", concatenate them
+    words = company_name.lower().split()
+
+    # Common suffixes to remove
+    suffixes_to_remove = {'co', 'ltd', 'inc', 'corp', 'mfg', 'corporation', 'company', 'limited'}
+
+    # Filter out suffixes and take remaining words
+    name_words = [w for w in words if w not in suffixes_to_remove]
+
+    if not name_words:
+        # If all words were suffixes, just use the first word
+        name_words = [words[0]] if words else ['unknown']
+
+    # Join remaining words (handles "Car Mate" -> "carmate")
+    return ''.join(name_words)
+
+
+def find_sheet_name_references(workbook: openpyxl.Workbook, old_prefix: str) -> list[tuple[str, int, int, str]]:
+    """Find all formula references to sheets with the given prefix.
+
+    Returns list of (sheet_name, row, col, formula) tuples.
+    """
+    references = []
+    old_is_pattern = f"{old_prefix}_IS" if old_prefix else None
+    old_bs_pattern = f"{old_prefix}_bs" if old_prefix else None
+
+    # Also check case variations
+    patterns = set()
+    if old_prefix:
+        patterns.add(f"{old_prefix}_IS")
+        patterns.add(f"{old_prefix}_is")
+        patterns.add(f"{old_prefix}_bs")
+        patterns.add(f"{old_prefix}_BS")
+        patterns.add(f"{old_prefix.lower()}_IS")
+        patterns.add(f"{old_prefix.lower()}_is")
+        patterns.add(f"{old_prefix.lower()}_bs")
+        patterns.add(f"{old_prefix.lower()}_BS")
+
+    for sheet_name in workbook.sheetnames:
+        ws = workbook[sheet_name]
+        for row in range(1, 100):
+            for col in range(1, 100):
+                cell = ws.cell(row=row, column=col)
+                if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
+                    formula = cell.value
+                    # Check if formula contains any of the old sheet name patterns
+                    for pattern in patterns:
+                        if pattern in formula:
+                            references.append((sheet_name, row, col, formula))
+                            break
+
+    return references
+
+
+def rename_sheets_and_update_references(
+    workbook: openpyxl.Workbook,
+    old_prefix: str,
+    new_prefix: str,
+    dry_run: bool = False
+) -> tuple[int, int]:
+    """Rename raw data sheets and update all formula references.
+
+    Returns (sheets_renamed, formulas_updated) counts.
+    """
+    sheets_renamed = 0
+    formulas_updated = 0
+
+    # Build mapping of old sheet names to new sheet names
+    rename_map = {}
+    for sheet_name in workbook.sheetnames:
+        sheet_lower = sheet_name.lower()
+        # Check for IS sheets
+        if sheet_lower == f"{old_prefix.lower()}_is":
+            rename_map[sheet_name] = f"{new_prefix}_IS"
+        # Check for BS sheets
+        elif sheet_lower == f"{old_prefix.lower()}_bs":
+            rename_map[sheet_name] = f"{new_prefix}_bs"
+
+    if not rename_map:
+        logger.warning(f"No sheets found matching prefix '{old_prefix}'")
+        return 0, 0
+
+    logger.info(f"Sheet rename map: {rename_map}")
+
+    # Update all formula references first
+    for sheet_name in workbook.sheetnames:
+        ws = workbook[sheet_name]
+        for row in range(1, 100):
+            for col in range(1, 100):
+                cell = ws.cell(row=row, column=col)
+                if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
+                    original_formula = cell.value
+                    new_formula = original_formula
+
+                    # Replace all old sheet name references with new ones
+                    for old_name, new_name in rename_map.items():
+                        # Handle various cases: exact match and case variations
+                        new_formula = new_formula.replace(f"{old_name}!", f"{new_name}!")
+                        # Also try lowercase variations
+                        new_formula = new_formula.replace(f"{old_name.lower()}!", f"{new_name}!")
+
+                    if new_formula != original_formula:
+                        if not dry_run:
+                            cell.value = new_formula
+                        formulas_updated += 1
+                        logger.debug(f"Updated formula in {sheet_name}!{get_column_letter(col)}{row}")
+
+    # Now rename the sheets
+    for old_name, new_name in rename_map.items():
+        if old_name in workbook.sheetnames:
+            if not dry_run:
+                workbook[old_name].title = new_name
+            sheets_renamed += 1
+            logger.info(f"Renamed sheet '{old_name}' to '{new_name}'")
+
+    return sheets_renamed, formulas_updated
+
+
+def detect_current_company_prefix(workbook: openpyxl.Workbook) -> str | None:
+    """Detect the current company prefix from sheet names.
+
+    Looks for sheets matching patterns like 'xxx_IS' or 'xxx_bs'.
+    """
+    for sheet_name in workbook.sheetnames:
+        sheet_lower = sheet_name.lower()
+        if sheet_lower.endswith('_is'):
+            return sheet_name[:-3]  # Remove '_is' suffix, preserve original case
+        elif sheet_lower.endswith('_bs'):
+            return sheet_name[:-3]  # Remove '_bs' suffix
+    return None
 
 
 def build_label_to_row_map(worksheet, start_row: int = 12, max_row: int = 60, label_col: int = 3) -> dict[str, int]:
@@ -641,6 +819,128 @@ def add_new_period_column(
     return formulas_extended
 
 
+def update_ncav_price_formulas(
+    workbook: openpyxl.Workbook,
+    dry_run: bool = False
+) -> int:
+    """Update price-related formulas in ncav sheet to reference the most recent period.
+
+    The ncav sheet has special formulas that divide price by per-share values.
+    These formulas should always reference the LAST column with data (most recent period),
+    not follow the standard column-shifting pattern.
+
+    Returns count of formulas updated.
+    """
+    if 'ncav' not in workbook.sheetnames:
+        logger.debug("No ncav sheet found, skipping price formula update")
+        return 0
+
+    ws = workbook['ncav']
+
+    # Find the last data column by looking at row 1 (date headers)
+    last_data_col = 4  # Minimum is column D
+    for col in range(4, 100):
+        if ws.cell(row=1, column=col).value:
+            last_data_col = col
+        elif col > 5:
+            # Allow one empty column but stop at second
+            next_val = ws.cell(row=1, column=col + 1).value
+            if not next_val:
+                break
+
+    last_col_letter = get_column_letter(last_data_col)
+    logger.info(f"ncav sheet: last data column is {last_col_letter} (column {last_data_col})")
+
+    # Find the Price row (look for "Price" label in column A or B)
+    price_row = None
+    for row in range(40, 50):
+        label_a = ws.cell(row=row, column=1).value
+        label_b = ws.cell(row=row, column=2).value
+        label = (label_a or label_b or "").lower().strip()
+        if label == "price":
+            price_row = row
+            break
+
+    if not price_row:
+        logger.warning("Could not find Price row in ncav sheet")
+        return 0
+
+    logger.debug(f"Found Price row at row {price_row}")
+
+    # Define the rows with price-related formulas (P/NCAV, P/Discounted NCAV, P/NTA, P/Net Cash)
+    # These are typically the rows immediately after Price
+    price_formula_rows = []
+    for row in range(price_row + 1, price_row + 10):
+        label_a = ws.cell(row=row, column=1).value
+        label_b = ws.cell(row=row, column=2).value
+        label = (label_a or label_b or "").lower().strip()
+        if label.startswith("p /") or label.startswith("p/"):
+            price_formula_rows.append(row)
+
+    if not price_formula_rows:
+        logger.debug("No price ratio rows found")
+        return 0
+
+    logger.info(f"Found price ratio rows: {price_formula_rows}")
+
+    # Define the mapping of ratio rows to their denominator rows
+    # P/NCAV -> NCAV/Share (row 34)
+    # P/Discounted NCAV -> Discounted NCAV/Share (row 38)
+    # P/NTA -> Net Tangible Assets/Share (row 29)
+    # P/Net Cash -> Net Cash/Share (row 41)
+    ratio_to_denominator = {}
+    for row in range(1, 60):
+        label_a = ws.cell(row=row, column=1).value
+        label_b = ws.cell(row=row, column=2).value
+        label = (label_a or label_b or "").lower().strip()
+        if "ncav / share" in label or "ncav/share" in label:
+            if "discounted" in label:
+                ratio_to_denominator["p / discounted ncav"] = row
+                ratio_to_denominator["p/discounted ncav"] = row
+            else:
+                ratio_to_denominator["p / ncav"] = row
+                ratio_to_denominator["p/ncav"] = row
+        elif "net tangible assets / sha" in label or "nta / sha" in label or "nta/sha" in label:
+            ratio_to_denominator["p / nta"] = row
+            ratio_to_denominator["p/nta"] = row
+        elif "net cash / share" in label or "net cash/share" in label:
+            ratio_to_denominator["p / net cash"] = row
+            ratio_to_denominator["p/net cash"] = row
+
+    logger.debug(f"Ratio to denominator mapping: {ratio_to_denominator}")
+
+    formulas_updated = 0
+
+    # Update each price formula row
+    for row in price_formula_rows:
+        label_a = ws.cell(row=row, column=1).value
+        label_b = ws.cell(row=row, column=2).value
+        label = (label_a or label_b or "").lower().strip()
+
+        # Find the denominator row for this ratio
+        denom_row = ratio_to_denominator.get(label)
+
+        if denom_row:
+            # Build the new formula: =<price_col><price_row>/<price_col><denom_row>
+            # Handle Net Cash specially with IFERROR
+            if "net cash" in label:
+                new_formula = f'=IFERROR({last_col_letter}{price_row}/{last_col_letter}{denom_row}, "NA")'
+            else:
+                new_formula = f"={last_col_letter}{price_row}/{last_col_letter}{denom_row}"
+
+            current_formula = ws.cell(row=row, column=last_data_col).value
+
+            if current_formula != new_formula:
+                logger.info(f"Updating row {row} ({label}): {current_formula} -> {new_formula}")
+                if not dry_run:
+                    ws.cell(row=row, column=last_data_col).value = new_formula
+                formulas_updated += 1
+        else:
+            logger.warning(f"Could not find denominator row for '{label}'")
+
+    return formulas_updated
+
+
 def update_workbook(
     workbook_path: str,
     is_export_path: str | None = None,
@@ -648,9 +948,21 @@ def update_workbook(
     extend_periods: bool = False,
     replace_all: bool = False,
     dry_run: bool = False,
-    force: bool = False
+    force: bool = False,
+    company_name: str | None = None
 ) -> UpdateResult:
-    """Update a workbook with new data from Investing.com exports."""
+    """Update a workbook with new data from Investing.com exports.
+
+    Args:
+        workbook_path: Path to the workbook to update
+        is_export_path: Path to Income Statement export file
+        bs_export_path: Path to Balance Sheet export file
+        extend_periods: Add new period columns if found in export
+        replace_all: Replace all data (for switching companies or data sources)
+        dry_run: Show what would change without making changes
+        force: Force update even if validation fails
+        company_name: New company name (auto-detected from export filenames if not provided)
+    """
 
     result = UpdateResult()
 
@@ -689,6 +1001,44 @@ def update_workbook(
     is_sheet, bs_sheet = find_sheets(wb)
 
     calculation_sheets = ['ncav', 'profitability', 'piotrosky', 'C7', 'ro']
+
+    # Step 3.5: Handle company name / sheet renaming
+    # Detect current company prefix from existing sheet names
+    old_prefix = detect_current_company_prefix(wb)
+    result.old_company_prefix = old_prefix
+
+    # Determine new company name (from argument or auto-detect from export filenames)
+    new_company_name = company_name
+    if not new_company_name:
+        # Try to extract from export filenames
+        for export_path in [is_export_path, bs_export_path]:
+            if export_path:
+                extracted = extract_company_name_from_filename(export_path)
+                if extracted:
+                    new_company_name = extracted
+                    break
+
+    if new_company_name:
+        new_prefix = normalize_company_name_for_sheet(new_company_name)
+        result.new_company_prefix = new_prefix
+
+        # Only rename if the prefix has changed
+        if old_prefix and new_prefix and old_prefix.lower() != new_prefix.lower():
+            logger.info(f"Company change detected: '{old_prefix}' -> '{new_prefix}'")
+            sheets_renamed, formulas_updated = rename_sheets_and_update_references(
+                wb, old_prefix, new_prefix, dry_run
+            )
+            result.sheets_renamed = sheets_renamed
+            result.formula_refs_updated = formulas_updated
+
+            # Update the sheet name variables to reflect the new names
+            if sheets_renamed > 0:
+                is_sheet, bs_sheet = find_sheets(wb)
+                logger.info(f"Renamed {sheets_renamed} sheets, updated {formulas_updated} formula references")
+        elif old_prefix and new_prefix:
+            logger.info(f"Company prefix unchanged: '{old_prefix}'")
+    else:
+        logger.debug("No company name provided or detected from filenames")
 
     # Step 4: Update Income Statement
     if is_export_path and is_sheet:
@@ -804,8 +1154,15 @@ def update_workbook(
             result.formulas_extended += formulas_extended
             logger.info(f"Extended {formulas_extended} formulas in calculation sheets")
 
+        # Update price-related formulas in ncav sheet to reference most recent period
+        logger.info("Updating ncav price formulas...")
+        price_formulas_updated = update_ncav_price_formulas(wb, dry_run)
+        if price_formulas_updated > 0:
+            result.price_formulas_updated = price_formulas_updated
+            logger.info(f"Updated {price_formulas_updated} price formulas in ncav sheet")
+
     # Step 7: Save workbook
-    if not dry_run and result.cells_updated > 0:
+    if not dry_run and (result.cells_updated > 0 or result.sheets_renamed > 0):
         wb.save(workbook_path)
         logger.info(f"Workbook saved: {workbook_path}")
 
@@ -836,6 +1193,8 @@ def main():
                         help='Output update report to JSON file')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Show detailed changes')
+    parser.add_argument('--company-name', '-c',
+                        help='New company name (auto-detected from export filenames if not provided)')
 
     args = parser.parse_args()
 
@@ -850,7 +1209,8 @@ def main():
         args.extend_periods,
         args.replace_all,
         args.dry_run,
-        args.force
+        args.force,
+        args.company_name
     )
 
     # Print summary
@@ -864,14 +1224,25 @@ def main():
     if result.backup_path:
         print(f"Backup: {result.backup_path}")
 
-    print(f"\nChanges Summary:")
+    # Company name change info
+    if result.sheets_renamed > 0:
+        print(f"\nCompany Change:")
+        print(f"  Old prefix: {result.old_company_prefix}")
+        print(f"  New prefix: {result.new_company_prefix}")
+        print(f"  Sheets renamed: {result.sheets_renamed}")
+        print(f"  Formula references updated: {result.formula_refs_updated}")
+
+    print(f"\nData Changes Summary:")
     print(f"  Income Statement cells updated: {result.is_cells_updated}")
     print(f"  Balance Sheet cells updated: {result.bs_cells_updated}")
     print(f"  Total cells updated: {result.cells_updated}")
 
-    if args.extend_periods:
+    if args.extend_periods or result.formulas_extended > 0:
         print(f"  New columns added: {result.new_columns_added}")
         print(f"  Formulas extended: {result.formulas_extended}")
+
+    if result.price_formulas_updated > 0:
+        print(f"  Price formulas updated: {result.price_formulas_updated}")
 
     if result.errors:
         print(f"\nErrors:")

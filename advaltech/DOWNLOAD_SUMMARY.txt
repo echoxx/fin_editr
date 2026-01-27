@@ -1,0 +1,126 @@
+ADVAL TECH HOLDING AG - INVESTOR RELATIONS DOCUMENTS
+=====================================================
+Download Date: January 24, 2026
+Source: https://www.advaltech.com/en/investors
+Language: English
+Company: Adval Tech Holding AG (SIX: ADVN)
+Headquarters: Niederwangen bei Bern, Switzerland
+
+DOCUMENT INVENTORY
+==================
+
+ANNUAL REPORTS (25 files)
+-------------------------
+2024: adval_tech_annual_report_2024_short_version.pdf (0.97 MB)
+      Note: Full version not yet available in English; only short version published
+2023: adval_tech_annual_report_2023.pdf (11.61 MB)
+2022: adval_tech_annual_report_2022.pdf (5.38 MB)
+2021: adval_tech_annual_report_2021.pdf (22.29 MB)
+2020: adval_tech_annual_report_2020.pdf (4.58 MB)
+2019: adval_tech_annual_report_2019.pdf (3.81 MB)
+2018: adval_tech_annual_report_2018.pdf (3.57 MB)
+2017: adval_tech_annual_report_2017.pdf (4.74 MB)
+2016: adval_tech_annual_report_2016.pdf (4.21 MB)
+2015: adval_tech_annual_report_2015.pdf (3.61 MB)
+2014: adval_tech_annual_report_2014.pdf (4.97 MB)
+2013: adval_tech_annual_report_2013.pdf (3.68 MB)
+2012: adval_tech_annual_report_2012.pdf (2.30 MB)
+2011: adval_tech_annual_report_2011.pdf (2.08 MB)
+2010: adval_tech_annual_report_2010.pdf (2.07 MB)
+2009: adval_tech_annual_report_2009.pdf (1.66 MB)
+2008: adval_tech_annual_report_2008.pdf (5.41 MB)
+2007: adval_tech_annual_report_2007.pdf (3.32 MB)
+2006: adval_tech_annual_report_2006.pdf (1.02 MB)
+2005: adval_tech_annual_report_2005.pdf (3.67 MB)
+2004: adval_tech_annual_report_2004.pdf (3.43 MB)
+2003: adval_tech_annual_report_2003.pdf (1.90 MB)
+2002: adval_tech_annual_report_2002.pdf (2.02 MB)
+2001: adval_tech_annual_report_2001.pdf (3.16 MB)
+2000: adval_tech_annual_report_2000.pdf (0.58 MB)
+
+INTERIM/HALF-YEAR REPORTS (3 files)
+-----------------------------------
+2024: adval_tech_half_year_2024_ad_hoc_announcement.pdf (0.14 MB)
+2017: adval_tech_half_year_2017_results.pdf (0.15 MB)
+2012: adval_tech_half_year_report_2012.pdf (0.24 MB)
+
+Note: Half-year reports for years 2018-2023 were not found in English.
+Adval Tech may publish half-year results only as ad-hoc announcements.
+
+PRESS RELEASES / AD-HOC ANNOUNCEMENTS (5 files)
+-----------------------------------------------
+2024: adval_tech_ad_hoc_2024_annual_results.pdf (0.13 MB)
+      adval_tech_ad_hoc_2024_strategy_board_changes.pdf (0.16 MB)
+2023: adval_tech_ad_hoc_2023_annual_results.pdf (0.12 MB)
+2017: adval_tech_annual_results_2017.pdf (0.15 MB)
+2016: adval_tech_annual_results_2016.pdf (0.14 MB)
+
+SUSTAINABILITY REPORTS (1 file)
+-------------------------------
+2023: adval_tech_sustainability_report_2023.pdf (3.34 MB)
+
+OTHER DOCUMENTS (1 file)
+------------------------
+2018: adval_tech_image_brochure_2018.pdf (2.70 MB)
+
+SUMMARY
+=======
+Total documents: 35 PDF files
+Total size: 113.46 MB
+Coverage: 2000-2024 (25 years of annual reports)
+
+FOLDER STRUCTURE
+================
+advaltech/
+  2024/
+    annual_reports/
+    interim_reports/
+    press_releases/
+  2023/
+    annual_reports/
+    sustainability_reports/
+  2022/annual_reports/
+  2021/annual_reports/
+  2020/annual_reports/
+  2019/annual_reports/
+  2018/annual_reports/
+  2017/
+    annual_reports/
+    interim_reports/
+    press_releases/
+  2016/
+    annual_reports/
+    press_releases/
+  2015/annual_reports/
+  2014/annual_reports/
+  2013/annual_reports/
+  2012/
+    annual_reports/
+    interim_reports/
+  2011/annual_reports/
+  2010/annual_reports/
+  2009/annual_reports/
+  2008/annual_reports/
+  2007/annual_reports/
+  2006/annual_reports/
+  2005/annual_reports/
+  2004/annual_reports/
+  2003/annual_reports/
+  2002/annual_reports/
+  2001/annual_reports/
+  2000/annual_reports/
+  other/brochures/
+
+SOURCES
+=======
+Primary: https://a.storyblok.com/f/173406/ (Adval Tech's Storyblok CDN)
+Secondary: https://companiesmarketcap.com/adval-tech-holding-ag/annual-reports/
+Official: https://www.advaltech.com/en/investors
+
+NOTES
+=====
+- All documents are in English
+- 2024 full annual report is pending release (only short version available)
+- Half-year reports prior to 2012 may be available in German only
+- Company fiscal year ends December 31
+- Adval Tech Holding AG trades on SIX Swiss Exchange (ticker: ADVN)
