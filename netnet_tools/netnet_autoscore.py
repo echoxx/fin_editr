@@ -14,13 +14,32 @@ import argparse
 import logging
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import openpyxl
 from openpyxl.utils import get_column_letter, column_index_from_string
+
+
+@dataclass
+class CellRef:
+    """Reference to a specific cell in the workbook."""
+    sheet: str
+    row: int
+    col: int
+    value: float
+    date: Optional[str] = None  # Date from the header row
+
+    def to_excel_ref(self) -> str:
+        """Return Excel-style cell reference like 'ncav!AA26'."""
+        col_letter = get_column_letter(self.col)
+        return f"{self.sheet}!{col_letter}{self.row}"
+
+    def to_formula(self) -> str:
+        """Return Excel formula referencing this cell."""
+        return f"={self.to_excel_ref()}"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,11 +81,15 @@ DATA_LOCATIONS = {
     'piotrosky': {
         'score_column': 11,  # Column K
         'notes_column': 12,  # Column L
+        'ref_column': 13,    # Column M - cell references
+        'date_column': 14,   # Column N - period dates
         'total_row': 10,
     },
     'c7': {
         'score_column': 8,   # Column H
         'notes_column': 9,   # Column I
+        'ref_column': 10,    # Column J - cell references
+        'date_column': 11,   # Column K - period dates
         'core_rows': (2, 10),
         'ranking_rows': (14, 22),
         'core_total_row': 11,
@@ -83,6 +106,7 @@ class ScoreResult:
     confidence: str       # 'high', 'medium', 'low', 'manual_required'
     reasoning: str        # Explanation of how score was determined
     values_used: dict     # The actual values used in determination
+    source_refs: list = field(default_factory=list)  # List of CellRef objects for traceability
 
 
 class WorkbookEvaluator:
@@ -285,6 +309,34 @@ class WorkbookEvaluator:
             return None
         return series[-1][1]
 
+    def get_date_for_column(self, sheet_name: str, col: int, header_row: int = 1) -> Optional[str]:
+        """Get the date string from the header row for a given column."""
+        ws = self.wb_formulas[sheet_name]
+        val = ws.cell(row=header_row, column=col).value
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val.strftime('%Y-%m-%d')
+        return str(val)
+
+    def get_latest_cell_ref(self, sheet_name: str, row_num: int, series: list) -> Optional[CellRef]:
+        """Get a CellRef for the most recent value in a series."""
+        if not series:
+            return None
+        col, val = series[-1]
+        date = self.get_date_for_column(sheet_name, col)
+        return CellRef(sheet=sheet_name, row=row_num, col=col, value=val, date=date)
+
+    def get_latest_n_cell_refs(self, sheet_name: str, row_num: int, series: list, n: int = 2) -> Optional[list]:
+        """Get CellRef objects for the N most recent values in a series."""
+        if len(series) < n:
+            return None
+        refs = []
+        for col, val in series[-n:]:
+            date = self.get_date_for_column(sheet_name, col)
+            refs.append(CellRef(sheet=sheet_name, row=row_num, col=col, value=val, date=date))
+        return refs
+
 
 class NetNetScorer:
     """Scores Piotroski F-Score and C7 criteria."""
@@ -301,10 +353,12 @@ class NetNetScorer:
 
     def score_piotrosky_1_positive_earnings(self) -> ScoreResult:
         """Criterion 1: Positive net income."""
-        series = self.eval.get_row_series('profitability', DATA_LOCATIONS['profitability']['net_income'], start_col=3)
-        latest = self.eval.get_latest_value(series)
+        sheet = 'profitability'
+        row = DATA_LOCATIONS['profitability']['net_income']
+        series = self.eval.get_row_series(sheet, row, start_col=3)
 
-        if latest is None:
+        cell_ref = self.eval.get_latest_cell_ref(sheet, row, series)
+        if cell_ref is None:
             return ScoreResult(
                 criterion="Positive earnings",
                 score=None,
@@ -313,13 +367,14 @@ class NetNetScorer:
                 values_used={}
             )
 
-        score = 1 if latest > 0 else 0
+        score = 1 if cell_ref.value > 0 else 0
         return ScoreResult(
             criterion="Positive earnings",
             score=score,
             confidence="high",
-            reasoning=f"NI = {latest:,.0f} ({'positive' if score else 'negative/zero'})",
-            values_used={"net_income": latest}
+            reasoning=f"NI = {cell_ref.value:,.0f} ({'positive' if score else 'negative/zero'})",
+            values_used={"net_income": cell_ref.value},
+            source_refs=[cell_ref]
         )
 
     def score_piotrosky_2_positive_ocf(self) -> ScoreResult:
@@ -335,7 +390,9 @@ class NetNetScorer:
 
     def score_piotrosky_3_increasing_roa(self) -> ScoreResult:
         """Criterion 3: Increasing ROA."""
-        series = self.eval.get_row_series('ro', DATA_LOCATIONS['ro']['roa_annual'])
+        sheet = 'ro'
+        row = DATA_LOCATIONS['ro']['roa_annual']
+        series = self.eval.get_row_series(sheet, row)
 
         if len(series) < 2:
             return ScoreResult(
@@ -346,8 +403,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="Increasing ROA",
                 score=None,
@@ -356,13 +413,15 @@ class NetNetScorer:
                 values_used={}
             )
 
-        increasing = values[-1] > values[-2]
+        prior, current = refs[0], refs[1]
+        increasing = current.value > prior.value
         return ScoreResult(
             criterion="Increasing ROA",
             score=1 if increasing else 0,
             confidence="high",
-            reasoning=f"ROA: {values[-2]:.2%} -> {values[-1]:.2%} ({'↑' if increasing else '↓'})",
-            values_used={"roa_prior": values[-2], "roa_current": values[-1]}
+            reasoning=f"ROA: {prior.value:.2%} -> {current.value:.2%} ({'↑' if increasing else '↓'})",
+            values_used={"roa_prior": prior.value, "roa_current": current.value},
+            source_refs=refs
         )
 
     def score_piotrosky_4_ocf_greater_ni(self) -> ScoreResult:
@@ -377,7 +436,9 @@ class NetNetScorer:
 
     def score_piotrosky_5_decreasing_debt(self) -> ScoreResult:
         """Criterion 5: Decreasing long-term debt ratio."""
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['debt_to_assets'])
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['debt_to_assets']
+        series = self.eval.get_row_series(sheet, row)
 
         if len(series) < 2:
             return ScoreResult(
@@ -388,8 +449,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="Decreasing LT debt ratio",
                 score=None,
@@ -398,18 +459,22 @@ class NetNetScorer:
                 values_used={}
             )
 
-        decreasing = values[-1] < values[-2]
+        prior, current = refs[0], refs[1]
+        decreasing = current.value < prior.value
         return ScoreResult(
             criterion="Decreasing LT debt ratio",
             score=1 if decreasing else 0,
             confidence="high",
-            reasoning=f"D/A: {values[-2]:.2%} -> {values[-1]:.2%} ({'↓' if decreasing else '↑'})",
-            values_used={"debt_ratio_prior": values[-2], "debt_ratio_current": values[-1]}
+            reasoning=f"D/A: {prior.value:.2%} -> {current.value:.2%} ({'↓' if decreasing else '↑'})",
+            values_used={"debt_ratio_prior": prior.value, "debt_ratio_current": current.value},
+            source_refs=refs
         )
 
     def score_piotrosky_6_increasing_cr(self) -> ScoreResult:
         """Criterion 6: Increasing current ratio."""
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['current_ratio'])
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['current_ratio']
+        series = self.eval.get_row_series(sheet, row)
 
         if len(series) < 2:
             return ScoreResult(
@@ -420,8 +485,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="Increasing current ratio",
                 score=None,
@@ -430,18 +495,22 @@ class NetNetScorer:
                 values_used={}
             )
 
-        increasing = values[-1] > values[-2]
+        prior, current = refs[0], refs[1]
+        increasing = current.value > prior.value
         return ScoreResult(
             criterion="Increasing current ratio",
             score=1 if increasing else 0,
             confidence="high",
-            reasoning=f"CR: {values[-2]:.2f}x -> {values[-1]:.2f}x ({'↑' if increasing else '↓'})",
-            values_used={"cr_prior": values[-2], "cr_current": values[-1]}
+            reasoning=f"CR: {prior.value:.2f}x -> {current.value:.2f}x ({'↑' if increasing else '↓'})",
+            values_used={"cr_prior": prior.value, "cr_current": current.value},
+            source_refs=refs
         )
 
     def score_piotrosky_7_no_dilution(self) -> ScoreResult:
         """Criterion 7: No share dilution (stable or decreasing shares)."""
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['shares_outstanding'])
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['shares_outstanding']
+        series = self.eval.get_row_series(sheet, row)
 
         if len(series) < 2:
             return ScoreResult(
@@ -452,8 +521,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="No share dilution",
                 score=None,
@@ -462,18 +531,22 @@ class NetNetScorer:
                 values_used={}
             )
 
-        stable_or_decreasing = values[-1] <= values[-2]
+        prior, current = refs[0], refs[1]
+        stable_or_decreasing = current.value <= prior.value
         return ScoreResult(
             criterion="No share dilution",
             score=1 if stable_or_decreasing else 0,
             confidence="high",
-            reasoning=f"Shares: {values[-2]:,.0f} -> {values[-1]:,.0f} ({'stable/↓' if stable_or_decreasing else '↑ dilution'})",
-            values_used={"shares_prior": values[-2], "shares_current": values[-1]}
+            reasoning=f"Shares: {prior.value:,.0f} -> {current.value:,.0f} ({'stable/↓' if stable_or_decreasing else '↑ dilution'})",
+            values_used={"shares_prior": prior.value, "shares_current": current.value},
+            source_refs=refs
         )
 
     def score_piotrosky_8_increasing_gm(self) -> ScoreResult:
         """Criterion 8: Increasing gross margin."""
-        series = self.eval.get_row_series('profitability', DATA_LOCATIONS['profitability']['gross_margin'], start_col=3)
+        sheet = 'profitability'
+        row = DATA_LOCATIONS['profitability']['gross_margin']
+        series = self.eval.get_row_series(sheet, row, start_col=3)
 
         if len(series) < 2:
             return ScoreResult(
@@ -484,8 +557,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="Increasing gross margin",
                 score=None,
@@ -494,18 +567,22 @@ class NetNetScorer:
                 values_used={}
             )
 
-        increasing = values[-1] > values[-2]
+        prior, current = refs[0], refs[1]
+        increasing = current.value > prior.value
         return ScoreResult(
             criterion="Increasing gross margin",
             score=1 if increasing else 0,
             confidence="high",
-            reasoning=f"GM: {values[-2]:.1%} -> {values[-1]:.1%} ({'↑' if increasing else '↓'})",
-            values_used={"gm_prior": values[-2], "gm_current": values[-1]}
+            reasoning=f"GM: {prior.value:.1%} -> {current.value:.1%} ({'↑' if increasing else '↓'})",
+            values_used={"gm_prior": prior.value, "gm_current": current.value},
+            source_refs=refs
         )
 
     def score_piotrosky_9_increasing_at(self) -> ScoreResult:
         """Criterion 9: Increasing asset turnover."""
-        series = self.eval.get_row_series('ro', DATA_LOCATIONS['ro']['asset_turnover'])
+        sheet = 'ro'
+        row = DATA_LOCATIONS['ro']['asset_turnover']
+        series = self.eval.get_row_series(sheet, row)
 
         if len(series) < 2:
             return ScoreResult(
@@ -516,8 +593,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="Increasing asset turnover",
                 score=None,
@@ -526,13 +603,15 @@ class NetNetScorer:
                 values_used={}
             )
 
-        increasing = values[-1] > values[-2]
+        prior, current = refs[0], refs[1]
+        increasing = current.value > prior.value
         return ScoreResult(
             criterion="Increasing asset turnover",
             score=1 if increasing else 0,
             confidence="high",
-            reasoning=f"AT: {values[-2]:.2f}x -> {values[-1]:.2f}x ({'↑' if increasing else '↓'})",
-            values_used={"at_prior": values[-2], "at_current": values[-1]}
+            reasoning=f"AT: {prior.value:.2f}x -> {current.value:.2f}x ({'↑' if increasing else '↓'})",
+            values_used={"at_prior": prior.value, "at_current": current.value},
+            source_refs=refs
         )
 
     def score_all_piotrosky(self) -> list[ScoreResult]:
@@ -578,34 +657,39 @@ class NetNetScorer:
                 values_used={}
             )
 
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['ncav_per_share'])
-        ncav = self.eval.get_latest_value(series)
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['ncav_per_share']
+        series = self.eval.get_row_series(sheet, row)
+        cell_ref = self.eval.get_latest_cell_ref(sheet, row, series)
 
-        if ncav is None or ncav <= 0:
+        if cell_ref is None or cell_ref.value <= 0:
             return ScoreResult(
                 criterion="Low P/NCAV",
                 score=None,
                 confidence="manual_required",
-                reasoning=f"NCAV not available or non-positive: {ncav}",
+                reasoning=f"NCAV not available or non-positive: {cell_ref.value if cell_ref else None}",
                 values_used={}
             )
 
-        p_ncav = self.price / ncav
+        p_ncav = self.price / cell_ref.value
         score = 1 if p_ncav < 0.67 else 0
         return ScoreResult(
             criterion="Low P/NCAV",
             score=score,
             confidence="high",
             reasoning=f"P/NCAV = {p_ncav:.2f} (threshold: 0.67)",
-            values_used={"price": self.price, "ncav": ncav, "p_ncav": p_ncav}
+            values_used={"price": self.price, "ncav": cell_ref.value, "p_ncav": p_ncav},
+            source_refs=[cell_ref]
         )
 
     def score_c7_core_3_low_debt_equity(self) -> ScoreResult:
         """Core 3: Low Debt-to-Equity (< 0.5)."""
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['debt_to_equity'])
-        de = self.eval.get_latest_value(series)
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['debt_to_equity']
+        series = self.eval.get_row_series(sheet, row)
+        cell_ref = self.eval.get_latest_cell_ref(sheet, row, series)
 
-        if de is None:
+        if cell_ref is None:
             return ScoreResult(
                 criterion="Low D/E",
                 score=None,
@@ -614,18 +698,21 @@ class NetNetScorer:
                 values_used={}
             )
 
-        score = 1 if de < 0.5 else 0
+        score = 1 if cell_ref.value < 0.5 else 0
         return ScoreResult(
             criterion="Low D/E",
             score=score,
             confidence="high",
-            reasoning=f"D/E = {de:.2f} (threshold: 0.5)",
-            values_used={"debt_to_equity": de}
+            reasoning=f"D/E = {cell_ref.value:.2f} (threshold: 0.5)",
+            values_used={"debt_to_equity": cell_ref.value},
+            source_refs=[cell_ref]
         )
 
     def score_c7_core_4_adequate_earnings(self) -> ScoreResult:
         """Core 4: Adequate past earnings (any period with NI margin > 5%)."""
-        series = self.eval.get_row_series('profitability', DATA_LOCATIONS['profitability']['ni_margin'], start_col=3)
+        sheet = 'profitability'
+        row = DATA_LOCATIONS['profitability']['ni_margin']
+        series = self.eval.get_row_series(sheet, row, start_col=3)
 
         if not series:
             return ScoreResult(
@@ -636,16 +723,19 @@ class NetNetScorer:
                 values_used={}
             )
 
-        # Check if any period has > 5% margin
+        # Check if any period has > 5% margin and find the max
         has_adequate = any(v > 0.05 for (_, v) in series)
-        max_margin = max(v for (_, v) in series)
+        max_col, max_margin = max(series, key=lambda x: x[1])
+        max_date = self.eval.get_date_for_column(sheet, max_col)
+        max_ref = CellRef(sheet=sheet, row=row, col=max_col, value=max_margin, date=max_date)
 
         return ScoreResult(
             criterion="Adequate past earnings",
             score=1 if has_adequate else 0,
             confidence="high",
             reasoning=f"Max NI margin = {max_margin:.1%} (threshold: 5%)",
-            values_used={"max_ni_margin": max_margin, "periods_checked": len(series)}
+            values_used={"max_ni_margin": max_margin, "periods_checked": len(series)},
+            source_refs=[max_ref]
         )
 
     def score_c7_core_5_past_price_above_ncav(self) -> ScoreResult:
@@ -670,7 +760,9 @@ class NetNetScorer:
 
     def score_c7_core_7_not_selling_shares(self) -> ScoreResult:
         """Core 7: Not selling shares (stable or decreasing)."""
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['shares_outstanding'])
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['shares_outstanding']
+        series = self.eval.get_row_series(sheet, row)
 
         if len(series) < 2:
             return ScoreResult(
@@ -681,8 +773,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="Not selling shares",
                 score=None,
@@ -691,13 +783,15 @@ class NetNetScorer:
                 values_used={}
             )
 
-        not_selling = values[-1] <= values[-2]
+        prior, current = refs[0], refs[1]
+        not_selling = current.value <= prior.value
         return ScoreResult(
             criterion="Not selling shares",
             score=1 if not_selling else 0,
             confidence="high",
-            reasoning=f"Shares: {values[-2]:,.0f} -> {values[-1]:,.0f}",
-            values_used={"shares_prior": values[-2], "shares_current": values[-1]}
+            reasoning=f"Shares: {prior.value:,.0f} -> {current.value:,.0f}",
+            values_used={"shares_prior": prior.value, "shares_current": current.value},
+            source_refs=refs
         )
 
     def score_c7_core_8_small_market_cap(self) -> ScoreResult:
@@ -711,10 +805,12 @@ class NetNetScorer:
                 values_used={}
             )
 
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['shares_outstanding'])
-        shares = self.eval.get_latest_value(series)
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['shares_outstanding']
+        series = self.eval.get_row_series(sheet, row)
+        cell_ref = self.eval.get_latest_cell_ref(sheet, row, series)
 
-        if shares is None:
+        if cell_ref is None:
             return ScoreResult(
                 criterion="Market cap < $50mm",
                 score=None,
@@ -725,7 +821,7 @@ class NetNetScorer:
 
         # Note: price and shares may be in different units (shares in millions, price in yen, etc.)
         # Market cap calculation depends on the currency and units
-        market_cap = self.price * shares
+        market_cap = self.price * cell_ref.value
 
         # For Japanese stocks, this will be in yen. 50M USD ≈ 7.5B yen
         # Flag for manual review since currency varies
@@ -734,28 +830,34 @@ class NetNetScorer:
             score=None,
             confidence="manual_required",
             reasoning=f"Market cap = {market_cap:,.0f} (currency/unit check needed)",
-            values_used={"price": self.price, "shares": shares, "market_cap": market_cap}
+            values_used={"price": self.price, "shares": cell_ref.value, "market_cap": market_cap},
+            source_refs=[cell_ref]
         )
 
     def score_c7_core_9_low_burn_rate(self) -> ScoreResult:
         """Core 9: Low NCAV burn rate (YoY decline < threshold)."""
         # Try to get pre-calculated YoY change
-        yoy_series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['ncav_yoy_change'])
+        yoy_sheet = 'ncav'
+        yoy_row = DATA_LOCATIONS['ncav']['ncav_yoy_change']
+        yoy_series = self.eval.get_row_series(yoy_sheet, yoy_row)
 
         if yoy_series:
-            latest_yoy = self.eval.get_latest_value(yoy_series)
-            if latest_yoy is not None:
-                score = 1 if latest_yoy > self.burn_threshold else 0
+            cell_ref = self.eval.get_latest_cell_ref(yoy_sheet, yoy_row, yoy_series)
+            if cell_ref is not None:
+                score = 1 if cell_ref.value > self.burn_threshold else 0
                 return ScoreResult(
                     criterion="Low NCAV burn rate",
                     score=score,
                     confidence="high",
-                    reasoning=f"NCAV YoY: {latest_yoy:.1%} (threshold: {self.burn_threshold:.0%})",
-                    values_used={"ncav_yoy_change": latest_yoy}
+                    reasoning=f"NCAV YoY: {cell_ref.value:.1%} (threshold: {self.burn_threshold:.0%})",
+                    values_used={"ncav_yoy_change": cell_ref.value},
+                    source_refs=[cell_ref]
                 )
 
         # Fallback: calculate from NCAV series (need 3 periods for YoY in semi-annual)
-        ncav_series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['ncav_per_share'])
+        ncav_sheet = 'ncav'
+        ncav_row = DATA_LOCATIONS['ncav']['ncav_per_share']
+        ncav_series = self.eval.get_row_series(ncav_sheet, ncav_row)
 
         if len(ncav_series) < 3:
             return ScoreResult(
@@ -766,8 +868,13 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = [v for (_, v) in ncav_series[-3:]]
-        if values[-3] == 0:
+        # Get the last 3 values with their cell refs
+        last_3 = ncav_series[-3:]
+        refs = [CellRef(sheet=ncav_sheet, row=ncav_row, col=col,
+                       value=val, date=self.eval.get_date_for_column(ncav_sheet, col))
+                for col, val in last_3]
+
+        if refs[0].value == 0:
             return ScoreResult(
                 criterion="Low NCAV burn rate",
                 score=None,
@@ -776,7 +883,7 @@ class NetNetScorer:
                 values_used={}
             )
 
-        yoy_change = (values[-1] - values[-3]) / abs(values[-3])
+        yoy_change = (refs[-1].value - refs[0].value) / abs(refs[0].value)
         score = 1 if yoy_change > self.burn_threshold else 0
 
         return ScoreResult(
@@ -784,7 +891,8 @@ class NetNetScorer:
             score=score,
             confidence="medium",
             reasoning=f"Calculated NCAV YoY: {yoy_change:.1%}",
-            values_used={"ncav_yoy_calculated": yoy_change}
+            values_used={"ncav_yoy_calculated": yoy_change},
+            source_refs=[refs[0], refs[-1]]  # Show the two endpoints used for calculation
         )
 
     def score_all_c7_core(self) -> list[ScoreResult]:
@@ -807,10 +915,12 @@ class NetNetScorer:
 
     def score_c7_rank_1_high_current_ratio(self) -> ScoreResult:
         """Ranking 1: Current ratio > 1.5x."""
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['current_ratio'])
-        cr = self.eval.get_latest_value(series)
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['current_ratio']
+        series = self.eval.get_row_series(sheet, row)
+        cell_ref = self.eval.get_latest_cell_ref(sheet, row, series)
 
-        if cr is None:
+        if cell_ref is None:
             return ScoreResult(
                 criterion="CR > 1.5x",
                 score=None,
@@ -819,13 +929,14 @@ class NetNetScorer:
                 values_used={}
             )
 
-        score = 1 if cr > 1.5 else 0
+        score = 1 if cell_ref.value > 1.5 else 0
         return ScoreResult(
             criterion="CR > 1.5x",
             score=score,
             confidence="high",
-            reasoning=f"CR = {cr:.2f}x (threshold: 1.5x)",
-            values_used={"current_ratio": cr}
+            reasoning=f"CR = {cell_ref.value:.2f}x (threshold: 1.5x)",
+            values_used={"current_ratio": cell_ref.value},
+            source_refs=[cell_ref]
         )
 
     def score_c7_rank_2_not_financial(self) -> ScoreResult:
@@ -840,7 +951,9 @@ class NetNetScorer:
 
     def score_c7_rank_3_buying_back(self) -> ScoreResult:
         """Ranking 3: Company is buying back stock (shares decreasing)."""
-        series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['shares_outstanding'])
+        sheet = 'ncav'
+        row = DATA_LOCATIONS['ncav']['shares_outstanding']
+        series = self.eval.get_row_series(sheet, row)
 
         if len(series) < 2:
             return ScoreResult(
@@ -851,8 +964,8 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = self.eval.get_latest_n_values(series, 2)
-        if values is None:
+        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        if refs is None:
             return ScoreResult(
                 criterion="Buying back stock",
                 score=None,
@@ -861,13 +974,15 @@ class NetNetScorer:
                 values_used={}
             )
 
-        buying_back = values[-1] < values[-2]
+        prior, current = refs[0], refs[1]
+        buying_back = current.value < prior.value
         return ScoreResult(
             criterion="Buying back stock",
             score=1 if buying_back else 0,
             confidence="high",
-            reasoning=f"Shares: {values[-2]:,.0f} -> {values[-1]:,.0f} ({'↓ buyback' if buying_back else 'no buyback'})",
-            values_used={"shares_prior": values[-2], "shares_current": values[-1]}
+            reasoning=f"Shares: {prior.value:,.0f} -> {current.value:,.0f} ({'↓ buyback' if buying_back else 'no buyback'})",
+            values_used={"shares_prior": prior.value, "shares_current": current.value},
+            source_refs=refs
         )
 
     def score_c7_rank_4_low_price_net_cash(self) -> ScoreResult:
@@ -903,22 +1018,27 @@ class NetNetScorer:
     def score_c7_rank_7_positive_burn(self) -> ScoreResult:
         """Ranking 7: Positive burn rate (NCAV growing)."""
         # Try pre-calculated YoY
-        yoy_series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['ncav_yoy_change'])
+        yoy_sheet = 'ncav'
+        yoy_row = DATA_LOCATIONS['ncav']['ncav_yoy_change']
+        yoy_series = self.eval.get_row_series(yoy_sheet, yoy_row)
 
         if yoy_series:
-            latest_yoy = self.eval.get_latest_value(yoy_series)
-            if latest_yoy is not None:
-                score = 1 if latest_yoy > 0 else 0
+            cell_ref = self.eval.get_latest_cell_ref(yoy_sheet, yoy_row, yoy_series)
+            if cell_ref is not None:
+                score = 1 if cell_ref.value > 0 else 0
                 return ScoreResult(
                     criterion="Positive burn rate",
                     score=score,
                     confidence="high",
-                    reasoning=f"NCAV YoY: {latest_yoy:.1%} ({'growing' if score else 'declining'})",
-                    values_used={"ncav_yoy_change": latest_yoy}
+                    reasoning=f"NCAV YoY: {cell_ref.value:.1%} ({'growing' if score else 'declining'})",
+                    values_used={"ncav_yoy_change": cell_ref.value},
+                    source_refs=[cell_ref]
                 )
 
         # Fallback calculation
-        ncav_series = self.eval.get_row_series('ncav', DATA_LOCATIONS['ncav']['ncav_per_share'])
+        ncav_sheet = 'ncav'
+        ncav_row = DATA_LOCATIONS['ncav']['ncav_per_share']
+        ncav_series = self.eval.get_row_series(ncav_sheet, ncav_row)
 
         if len(ncav_series) < 3:
             return ScoreResult(
@@ -929,8 +1049,13 @@ class NetNetScorer:
                 values_used={}
             )
 
-        values = [v for (_, v) in ncav_series[-3:]]
-        if values[-3] == 0:
+        # Get the last 3 values with their cell refs
+        last_3 = ncav_series[-3:]
+        refs = [CellRef(sheet=ncav_sheet, row=ncav_row, col=col,
+                       value=val, date=self.eval.get_date_for_column(ncav_sheet, col))
+                for col, val in last_3]
+
+        if refs[0].value == 0:
             return ScoreResult(
                 criterion="Positive burn rate",
                 score=None,
@@ -939,7 +1064,7 @@ class NetNetScorer:
                 values_used={}
             )
 
-        yoy_change = (values[-1] - values[-3]) / abs(values[-3])
+        yoy_change = (refs[-1].value - refs[0].value) / abs(refs[0].value)
         score = 1 if yoy_change > 0 else 0
 
         return ScoreResult(
@@ -947,7 +1072,8 @@ class NetNetScorer:
             score=score,
             confidence="medium",
             reasoning=f"NCAV YoY: {yoy_change:.1%}",
-            values_used={"ncav_yoy_calculated": yoy_change}
+            values_used={"ncav_yoy_calculated": yoy_change},
+            source_refs=[refs[0], refs[-1]]
         )
 
     def score_c7_rank_8_reasonable_pay(self) -> ScoreResult:
@@ -1020,16 +1146,43 @@ def print_report(piotrosky_results: list[ScoreResult],
     print_section("C7 RANKING CRITERIA", c7_rank_results)
 
 
+def _format_source_refs(refs: list) -> tuple[str, str]:
+    """Format source references for Excel output.
+
+    Returns:
+        tuple: (cell_refs_formula, dates_str)
+            - cell_refs_formula: Excel formula referencing source cells (e.g., "=ncav!AA26")
+            - dates_str: Comma-separated date strings for the periods used
+    """
+    if not refs:
+        return "", ""
+
+    # Build cell reference formula(s)
+    if len(refs) == 1:
+        ref_formula = refs[0].to_formula()
+    else:
+        # For multiple refs, show them as a semicolon-separated list
+        ref_formula = "; ".join(r.to_excel_ref() for r in refs)
+
+    # Build date string
+    dates = [r.date for r in refs if r.date]
+    dates_str = " → ".join(dates) if dates else ""
+
+    return ref_formula, dates_str
+
+
 def write_scores_to_workbook(wb: openpyxl.Workbook,
                              piotrosky_results: list[ScoreResult],
                              c7_core_results: list[ScoreResult],
                              c7_rank_results: list[ScoreResult]):
-    """Write scores and notes to the workbook."""
+    """Write scores, notes, cell references, and dates to the workbook."""
 
     # Write Piotroski scores
     ws = wb['piotrosky']
     score_col = DATA_LOCATIONS['piotrosky']['score_column']
     notes_col = DATA_LOCATIONS['piotrosky']['notes_column']
+    ref_col = DATA_LOCATIONS['piotrosky']['ref_column']
+    date_col = DATA_LOCATIONS['piotrosky']['date_column']
 
     for i, r in enumerate(piotrosky_results):
         row = i + 1  # Rows 1-9
@@ -1039,10 +1192,17 @@ def write_scores_to_workbook(wb: openpyxl.Workbook,
         else:
             ws.cell(row=row, column=notes_col).value = f"MANUAL: {r.reasoning}"
 
+        # Write source references
+        ref_formula, dates_str = _format_source_refs(r.source_refs)
+        ws.cell(row=row, column=ref_col).value = ref_formula
+        ws.cell(row=row, column=date_col).value = dates_str
+
     # Write C7 Core scores
     ws = wb['C7']
     score_col = DATA_LOCATIONS['c7']['score_column']
     notes_col = DATA_LOCATIONS['c7']['notes_column']
+    ref_col = DATA_LOCATIONS['c7']['ref_column']
+    date_col = DATA_LOCATIONS['c7']['date_column']
 
     for i, r in enumerate(c7_core_results):
         row = i + 2  # Rows 2-10
@@ -1052,6 +1212,11 @@ def write_scores_to_workbook(wb: openpyxl.Workbook,
         else:
             ws.cell(row=row, column=notes_col).value = f"MANUAL: {r.reasoning}"
 
+        # Write source references
+        ref_formula, dates_str = _format_source_refs(r.source_refs)
+        ws.cell(row=row, column=ref_col).value = ref_formula
+        ws.cell(row=row, column=date_col).value = dates_str
+
     # Write C7 Ranking scores
     for i, r in enumerate(c7_rank_results):
         row = i + 14  # Rows 14-22
@@ -1060,6 +1225,11 @@ def write_scores_to_workbook(wb: openpyxl.Workbook,
             ws.cell(row=row, column=notes_col).value = f"AUTO: {r.reasoning}"
         else:
             ws.cell(row=row, column=notes_col).value = f"MANUAL: {r.reasoning}"
+
+        # Write source references
+        ref_formula, dates_str = _format_source_refs(r.source_refs)
+        ws.cell(row=row, column=ref_col).value = ref_formula
+        ws.cell(row=row, column=date_col).value = dates_str
 
 
 def create_backup(filepath: str) -> str:
