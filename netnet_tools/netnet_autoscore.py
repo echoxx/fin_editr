@@ -21,6 +21,7 @@ from typing import Optional
 
 import openpyxl
 from openpyxl.utils import get_column_letter, column_index_from_string
+from openpyxl.worksheet.hyperlink import Hyperlink
 
 
 @dataclass
@@ -131,11 +132,69 @@ class WorkbookEvaluator:
         # Cache for evaluated values
         self._cache = {}
 
+        # Cache for detected data frequency per sheet
+        self._data_frequency = {}  # sheet_name -> 'quarterly' or 'semi-annual'
+
     def get_raw_value(self, sheet_name: str, row: int, col: int) -> Optional[float]:
         """Get raw value from IS or BS sheet, parsing string numbers."""
         ws = self.wb_formulas[sheet_name]
         val = ws.cell(row=row, column=col).value
         return self._parse_value(val)
+
+    def detect_data_frequency(self, sheet_name: str, sample_row: int) -> str:
+        """
+        Detect if data is quarterly or semi-annual by checking for consecutive identical values.
+
+        Semi-annual data that's reported quarterly will have pairs of identical values
+        (e.g., Q1==Q2, Q3==Q4) because the same semi-annual data is repeated.
+
+        Returns:
+            'quarterly' or 'semi-annual'
+        """
+        if sheet_name in self._data_frequency:
+            return self._data_frequency[sheet_name]
+
+        series = self.get_row_series(sheet_name, sample_row)
+        if len(series) < 4:
+            self._data_frequency[sheet_name] = 'quarterly'
+            return 'quarterly'
+
+        # Check the last 8 values for the pattern of consecutive identical pairs
+        recent = series[-8:] if len(series) >= 8 else series
+        pairs_identical = 0
+        pairs_different = 0
+
+        for i in range(0, len(recent) - 1, 2):
+            if i + 1 < len(recent):
+                val1 = recent[i][1]
+                val2 = recent[i + 1][1]
+                if val1 is not None and val2 is not None:
+                    # Consider values identical if they're within 0.01% of each other
+                    if abs(val1) > 0.0001:
+                        if abs(val1 - val2) / abs(val1) < 0.0001:
+                            pairs_identical += 1
+                        else:
+                            pairs_different += 1
+                    elif abs(val2) < 0.0001:  # Both essentially zero
+                        pairs_identical += 1
+                    else:
+                        pairs_different += 1
+
+        # If most pairs are identical, it's semi-annual
+        frequency = 'semi-annual' if pairs_identical > pairs_different else 'quarterly'
+        self._data_frequency[sheet_name] = frequency
+        logger.info(f"Detected {frequency} data frequency for sheet '{sheet_name}' (identical pairs: {pairs_identical}, different: {pairs_different})")
+        return frequency
+
+    def get_comparison_step(self, sheet_name: str, sample_row: int) -> int:
+        """
+        Get the number of columns to step back for a valid comparison.
+
+        For quarterly data, compare adjacent columns (step=1).
+        For semi-annual data, skip the duplicate and compare every 2 columns (step=2).
+        """
+        frequency = self.detect_data_frequency(sheet_name, sample_row)
+        return 2 if frequency == 'semi-annual' else 1
 
     def _parse_value(self, val) -> Optional[float]:
         """Parse a cell value to float, handling strings and percentages."""
@@ -337,6 +396,42 @@ class WorkbookEvaluator:
             refs.append(CellRef(sheet=sheet_name, row=row_num, col=col, value=val, date=date))
         return refs
 
+    def get_comparison_cell_refs(self, sheet_name: str, row_num: int, series: list) -> Optional[list]:
+        """
+        Get CellRef objects for comparing current vs prior period, respecting data frequency.
+
+        For quarterly data: returns [prior_quarter, current_quarter]
+        For semi-annual data: skips duplicates and returns [prior_semi, current_semi]
+
+        This ensures meaningful comparisons when data is semi-annual but displayed quarterly.
+        """
+        step = self.get_comparison_step(sheet_name, row_num)
+
+        # Need at least (step + 1) values to make a comparison
+        # For step=1: need 2 values (positions -2, -1)
+        # For step=2: need 3 values (positions -3, -1) or check if we have enough unique periods
+        min_required = step + 1
+        if len(series) < min_required:
+            return None
+
+        # Get current (most recent) value
+        current_col, current_val = series[-1]
+
+        # Get prior value (step back)
+        prior_idx = -1 - step
+        if abs(prior_idx) > len(series):
+            return None
+        prior_col, prior_val = series[prior_idx]
+
+        # Create CellRefs
+        prior_date = self.get_date_for_column(sheet_name, prior_col)
+        current_date = self.get_date_for_column(sheet_name, current_col)
+
+        return [
+            CellRef(sheet=sheet_name, row=row_num, col=prior_col, value=prior_val, date=prior_date),
+            CellRef(sheet=sheet_name, row=row_num, col=current_col, value=current_val, date=current_date)
+        ]
+
 
 class NetNetScorer:
     """Scores Piotroski F-Score and C7 criteria."""
@@ -394,22 +489,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['ro']['roa_annual']
         series = self.eval.get_row_series(sheet, row)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="Increasing ROA",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient ROA data for trend",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="Increasing ROA",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get ROA values",
+                reasoning="Insufficient ROA data for trend",
                 values_used={}
             )
 
@@ -440,22 +526,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['ncav']['debt_to_assets']
         series = self.eval.get_row_series(sheet, row)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="Decreasing LT debt ratio",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient debt/assets data",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="Decreasing LT debt ratio",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get debt ratio values",
+                reasoning="Insufficient debt/assets data",
                 values_used={}
             )
 
@@ -476,22 +553,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['ncav']['current_ratio']
         series = self.eval.get_row_series(sheet, row)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="Increasing current ratio",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient current ratio data",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="Increasing current ratio",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get current ratio values",
+                reasoning="Insufficient current ratio data",
                 values_used={}
             )
 
@@ -512,22 +580,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['ncav']['shares_outstanding']
         series = self.eval.get_row_series(sheet, row)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="No share dilution",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient shares data",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="No share dilution",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get shares values",
+                reasoning="Insufficient shares data",
                 values_used={}
             )
 
@@ -548,22 +607,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['profitability']['gross_margin']
         series = self.eval.get_row_series(sheet, row, start_col=3)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="Increasing gross margin",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient gross margin data",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="Increasing gross margin",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get gross margin values",
+                reasoning="Insufficient gross margin data",
                 values_used={}
             )
 
@@ -584,22 +634,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['ro']['asset_turnover']
         series = self.eval.get_row_series(sheet, row)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="Increasing asset turnover",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient asset turnover data",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="Increasing asset turnover",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get asset turnover values",
+                reasoning="Insufficient asset turnover data",
                 values_used={}
             )
 
@@ -764,22 +805,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['ncav']['shares_outstanding']
         series = self.eval.get_row_series(sheet, row)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="Not selling shares",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient shares data",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="Not selling shares",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get shares values",
+                reasoning="Insufficient shares data",
                 values_used={}
             )
 
@@ -955,22 +987,13 @@ class NetNetScorer:
         row = DATA_LOCATIONS['ncav']['shares_outstanding']
         series = self.eval.get_row_series(sheet, row)
 
-        if len(series) < 2:
-            return ScoreResult(
-                criterion="Buying back stock",
-                score=None,
-                confidence="manual_required",
-                reasoning="Insufficient shares data",
-                values_used={}
-            )
-
-        refs = self.eval.get_latest_n_cell_refs(sheet, row, series, 2)
+        refs = self.eval.get_comparison_cell_refs(sheet, row, series)
         if refs is None:
             return ScoreResult(
                 criterion="Buying back stock",
                 score=None,
                 confidence="manual_required",
-                reasoning="Could not get shares values",
+                reasoning="Insufficient shares data",
                 values_used={}
             )
 
@@ -1171,6 +1194,27 @@ def _format_source_refs(refs: list) -> tuple[str, str]:
     return ref_formula, dates_str
 
 
+def _add_hyperlink_to_cell(ws, row: int, col: int, refs: list, display_text: str):
+    """Add a hyperlink to a cell that navigates to the source reference.
+
+    For single refs, creates a direct hyperlink to that cell.
+    For multiple refs, creates a hyperlink to the most recent (last) ref.
+    """
+    if not refs:
+        ws.cell(row=row, column=col).value = display_text
+        return
+
+    # Use the most recent (current) reference for the hyperlink target
+    target_ref = refs[-1]
+    target_address = f"#{target_ref.to_excel_ref()}"
+
+    cell = ws.cell(row=row, column=col)
+    cell.value = display_text
+    cell.hyperlink = target_address
+    # Style as a hyperlink (blue, underlined)
+    cell.style = "Hyperlink"
+
+
 def write_scores_to_workbook(wb: openpyxl.Workbook,
                              piotrosky_results: list[ScoreResult],
                              c7_core_results: list[ScoreResult],
@@ -1192,9 +1236,9 @@ def write_scores_to_workbook(wb: openpyxl.Workbook,
         else:
             ws.cell(row=row, column=notes_col).value = f"MANUAL: {r.reasoning}"
 
-        # Write source references
+        # Write source references with hyperlinks for Piotroski
         ref_formula, dates_str = _format_source_refs(r.source_refs)
-        ws.cell(row=row, column=ref_col).value = ref_formula
+        _add_hyperlink_to_cell(ws, row, ref_col, r.source_refs, ref_formula)
         ws.cell(row=row, column=date_col).value = dates_str
 
     # Write C7 Core scores

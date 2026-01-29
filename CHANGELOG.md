@@ -2,6 +2,26 @@
 
 ## 2026-01-29
 
+### Added - Semi-Annual Data Detection & Hyperlinks
+
+Added automatic detection of semi-annual vs quarterly data and clickable hyperlinks for Piotroski references.
+
+#### New Features:
+- **Data frequency detection**: Automatically detects if data is quarterly or semi-annual by checking for consecutive identical values
+- **Smart period comparison**: For semi-annual data, compares periods 2 columns apart instead of adjacent columns
+- **Clickable hyperlinks**: Column M (Piotroski) now contains clickable hyperlinks that navigate directly to source cells
+
+#### How Semi-Annual Detection Works:
+- Checks the last 8 values in a series for pairs of identical consecutive values
+- If most pairs are identical (e.g., Q1==Q2, Q3==Q4), data is classified as semi-annual
+- Comparison methods then skip duplicates to compare actual different reporting periods
+
+#### Example:
+Before: CR: 3.41x -> 3.41x (comparing duplicate quarters) → Score: 0
+After:  CR: 2.73x -> 3.41x (comparing actual semi-annual periods) → Score: 1
+
+---
+
 ### Added - Cell Reference Traceability for Autoscoring
 
 Added the ability to trace autoscored values back to their source cells in the workbook.
