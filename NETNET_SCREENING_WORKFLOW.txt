@@ -1,0 +1,252 @@
+================================================================================
+NET-NET SCREENING WORKFLOW
+================================================================================
+
+This document describes the end-to-end workflow for screening net-net stock
+candidates using the automated tools in this repository.
+
+================================================================================
+OVERVIEW
+================================================================================
+
+The workflow has two main stages:
+
+1. EXCEL-FINANCIAL-UPDATER: Process raw financial data from Investing.com
+2. STAGE1-AUTOFILL: Populate the Stage 1 Quantitative screening checklist
+
+Data Flow:
+----------
+  Raw Investing.com exports (Balance Sheet + Income Statement)
+                    |
+                    v
+        excel-financial-updater agent
+                    |
+                    v
+        Company workbook (e.g., toso.xlsx)
+        - [company]_IS (Income Statement)
+        - [company]_bs (Balance Sheet)
+        - ncav (NCAV calculations)
+        - ro (ROA calculations)
+        - piotrosky (F-Score)
+        - Overview
+                    |
+                    v
+          stage1_autofill.py
+                    |
+                    v
+        [company]_netnet_diligence_checklist.xlsx
+        - Stage1_Quantitative sheet populated
+
+
+================================================================================
+STEP 1: DOWNLOAD RAW DATA FROM INVESTING.COM
+================================================================================
+
+1. Go to Investing.com Pro and search for the company
+2. Download the Balance Sheet export (Excel format)
+3. Download the Income Statement export (Excel format)
+4. Save both files in a company folder
+
+Example files:
+  - "Toso Co Ltd - Balance Sheet.xlsx"
+  - "Toso Co Ltd - Income Statement.xlsx"
+
+
+================================================================================
+STEP 2: RUN EXCEL-FINANCIAL-UPDATER
+================================================================================
+
+This agent processes the raw data and creates a structured analysis workbook.
+
+Usage (via Claude Code):
+------------------------
+Ask Claude to run the excel-financial-updater agent with your downloaded files.
+
+Example prompt:
+  "Please update the financial data for Toso using the Balance Sheet and
+   Income Statement files I downloaded"
+
+Or run the Python script directly:
+----------------------------------
+  cd fin_editr
+  python3 netnet_tools/netnet_main.py analyze TICKER --skip-download --folder ./company_folder
+
+Output:
+-------
+Creates a company workbook (e.g., toso.xlsx) with calculation sheets.
+
+
+================================================================================
+STEP 3: RUN STAGE1 QUANTITATIVE AUTOFILL
+================================================================================
+
+This script extracts metrics from the company workbook and populates the
+Stage 1 Quantitative screening checklist.
+
+REQUIRED INPUTS:
+----------------
+- Company workbook path (output from Step 2)
+- Current stock price (--price)
+- Market cap in USD millions (--market-cap)
+
+COMMANDS:
+---------
+
+# Preview metrics without creating file (recommended first step)
+python3 netnet_tools/stage1_autofill.py path/to/company.xlsx \
+    --price PRICE --market-cap MCAP --report-only
+
+# Create the checklist file
+python3 netnet_tools/stage1_autofill.py path/to/company.xlsx \
+    --price PRICE --market-cap MCAP
+
+# Dry run - show what would be written without creating file
+python3 netnet_tools/stage1_autofill.py path/to/company.xlsx \
+    --price PRICE --market-cap MCAP --dry-run
+
+EXAMPLES:
+---------
+
+# Toso (Japanese stock, price in Yen)
+python3 netnet_tools/stage1_autofill.py "../_purchased/toso/toso.xlsx" \
+    --price 650 --market-cap 36
+
+# Carmate
+python3 netnet_tools/stage1_autofill.py "../_purchased/carmate/carmate.xlsx" \
+    --price 1500 --market-cap 45
+
+OUTPUT:
+-------
+Creates [company]_netnet_diligence_checklist.xlsx in the company's folder.
+
+Example: toso/toso_netnet_diligence_checklist.xlsx
+
+
+================================================================================
+STAGE 1 QUANTITATIVE CRITERIA
+================================================================================
+
+HARD FILTERS (Must pass ALL - any failure = STOP):
+--------------------------------------------------
+  Criterion          | Threshold
+  -------------------|------------------
+  P/NCAV             | < 0.67 (< 0.60 if China)
+  NCAV Burn Rate     | > -10% (YoY)
+  Debt/Equity        | < 0.50
+  Current Ratio      | > 1.5
+
+SOFT FILTERS (2+ failures = strong pass signal):
+------------------------------------------------
+  Criterion                  | Threshold
+  ---------------------------|------------------
+  ROA Trend (3yr)            | Stable or increasing
+  Piotroski F-Score          | >= 5
+  Prior Price > 1x NCAV      | Yes (within 3-5 yrs) [MANUAL]
+  Positive TTM Net Income    | Yes
+
+NCAV TRAJECTORY (for context):
+------------------------------
+  - Current NCAV/share
+  - NCAV 1 year ago
+  - NCAV 2 years ago
+  - YoY change (calculated)
+  - 2-year CAGR (calculated)
+
+
+================================================================================
+FIELDS REQUIRING MANUAL INPUT
+================================================================================
+
+1. Prior Price > 1x NCAV
+   - Requires historical stock price research
+   - Check if price exceeded NCAV at any point in past 3-5 years
+   - Left blank by the script for manual completion
+
+
+================================================================================
+INTERPRETING RESULTS
+================================================================================
+
+PASS ALL HARD FILTERS:
+  -> Proceed to Stage 2 Qualitative analysis
+
+FAIL ANY HARD FILTER:
+  -> STOP - Do not invest time in further analysis
+
+EXAMPLE OUTPUT:
+---------------
+====================================================================
+STAGE 1 QUANTITATIVE AUTOFILL - Toso Co Ltd
+====================================================================
+Input: 650.0 | Market Cap: 36.0 USD mm
+
+HARD FILTERS:
+  P/NCAV: 0.64 -> PASS
+  NCAV Burn Rate: 5.09% -> PASS
+  Debt/Equity: 0.12 -> PASS
+  Current Ratio: 2.74 -> PASS
+
+SOFT FILTERS:
+  ROA Trend (3yr): stable
+  Piotroski F-Score: 7
+  Prior Price > 1x NCAV: [MANUAL - left blank]
+  Positive TTM Net Income: Yes
+
+NCAV TRAJECTORY:
+  Current: 1011.46 | 1yr ago: 962.47 | 2yr ago: 963.00
+  YoY Change: 5.09% | 2-year CAGR: 2.49%
+
+RESULT: 16 fields populated, 1 requires manual input
+====================================================================
+
+
+================================================================================
+FILE LOCATIONS
+================================================================================
+
+Scripts:
+  fin_editr/netnet_tools/stage1_autofill.py
+  fin_editr/netnet_tools/netnet_main.py
+  fin_editr/netnet_tools/netnet_updater.py
+
+Agent Definitions:
+  fin_editr/.claude/agents/stage1-quantitative-autofill.md
+  fin_editr/.claude/agents/excel-financial-updater.md
+
+Master Checklist Template:
+  netnet_diligence_checklist.xlsx (in project root)
+
+Company Workbooks:
+  _purchased/[company]/[company].xlsx
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+"Missing required sheet" error:
+  - Ensure excel-financial-updater has been run first
+  - Check that company workbook has: ncav, ro, profitability, piotrosky, Overview
+
+"Could not find netnet_diligence_checklist.xlsx" error:
+  - Use --checklist flag to specify template path
+  - Or ensure template exists in project root or parent directories
+
+Data shows as [NOT AVAILABLE]:
+  - Some metrics may not be calculable if insufficient historical data
+  - Check company workbook has at least 2-3 years of data
+
+
+================================================================================
+FUTURE ENHANCEMENTS (TODO)
+================================================================================
+
+- [ ] Add optional Yahoo Finance historical price lookup for "Prior Price > 1x NCAV"
+- [ ] Support batch processing of multiple companies
+- [ ] Add exchange rate lookup for automatic USD market cap calculation
+- [ ] Generate summary report across multiple screened companies
+
+
+================================================================================
+Last Updated: 2026-01-30
+================================================================================
